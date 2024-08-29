@@ -6,7 +6,44 @@ local cache = require("curl.cache")
 local buffers = require("curl.buffers")
 local output_parser = require("curl.output_parser")
 local notify = require("curl.notifications")
-local shell = require("curl.shell_utils")
+local shell = require("curl.utils.shell_utils")
+local strUtil = require("curl.utils.string")
+
+local function encode_url_params(url)
+	local anchor = ""
+	local index = url:find("#")
+	if index then
+		anchor = "#" .. strUtil.url_encode(url:sub(index + 1))
+		url = url:sub(1, index - 1)
+	end
+	index = url:find("?")
+	if index == nil then
+		return url .. anchor
+	end
+	local query = url:sub(index + 1)
+	url = url:sub(1, index - 1)
+	local query_parts = {}
+	if query then
+		query_parts = vim.split(query, "&")
+	end
+	local query_params = ""
+	for _, query_part in ipairs(query_parts) do
+		index = query_part:find("=")
+		if index then
+			query_params = query_params
+				.. "&"
+				.. strUtil.url_encode(query_part:sub(1, index - 1))
+				.. "="
+				.. strUtil.url_encode(query_part:sub(index + 1))
+		else
+			query_params = query_params .. "&" .. strUtil.url_encode(query_part)
+		end
+	end
+	if query_params ~= "" then
+		url = url .. "?" .. query_params:sub(2)
+	end
+	return url .. anchor
+end
 
 M.create_global_collection = function()
 	vim.ui.input({ prompt = "Collection name: " }, function(input)
@@ -106,6 +143,16 @@ M.execute_curl = function()
 	if curl_command == "" then
 		notify.error("No curl command found under the cursor")
 		return
+	end
+
+	local url_pattern = " [\"'](https?://.-)[\"'] "
+	local url = curl_command:match(url_pattern)
+	local encode_url = encode_url_params(url)
+	-- has encoded params
+	if url ~= encode_url then
+		url = url:gsub("([%.%?])", "%%%1")
+		encode_url = encode_url:gsub("([%.%%])", "%%%1")
+		curl_command = curl_command:gsub(url, encode_url, 1):gsub("%%([%.%-%+%*%?%[%]%(%)%$%^%{%}%|])", "%1")
 	end
 
 	local output = ""
